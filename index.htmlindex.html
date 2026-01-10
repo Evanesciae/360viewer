@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>360 Viewer</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+<style>
+body{margin:0;font-family:system-ui,-apple-system}
+#top{padding:10px;border-bottom:1px solid #eee;display:flex;gap:10px;align-items:center}
+#viewer{width:100vw;height:calc(100vh - 52px);background:#000;display:flex;align-items:center;justify-content:center}
+#hint{color:#bbb;text-align:center;font-size:14px;line-height:1.6}
+input{display:none}
+button,label{padding:8px 10px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="top">
+<label>
+打开 360 图片
+<input id="f" type="file" accept="image/*">
+</label>
+<button onclick="clearView()">清空</button>
+</div>
+
+<div id="viewer">
+  <div id="hint">
+    拖入 360 全景图<br>
+    或点击上方「打开 360 图片」<br>
+    <span style="font-size:12px;color:#888">仅本地查看，刷新即消失</span>
+  </div>
+</div>
+
+<script>
+let v,u;
+function clearView(){
+if(u)URL.revokeObjectURL(u);
+viewer.innerHTML='<div id="hint">拖入 360 全景图<br>或点击上方「打开 360 图片」<br><span style="font-size:12px;color:#888">仅本地查看，刷新即消失</span></div>';
+v=u=null;
+}
+function loadFile(f){
+if(u)URL.revokeObjectURL(u);
+u=URL.createObjectURL(f);
+viewer.innerHTML='';
+v=pannellum.viewer('viewer',{type:'equirectangular',panorama:u,autoLoad:true});
+}
+f.onchange=e=>e.target.files[0]&&loadFile(e.target.files[0]);
+viewer.ondragover=e=>e.preventDefault();
+viewer.ondrop=e=>{e.preventDefault();e.dataTransfer.files[0]&&loadFile(e.dataTransfer.files[0])};
+</script>
+</body>
+</html>
