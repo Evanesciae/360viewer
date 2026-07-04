@@ -46,6 +46,14 @@
     background-size:cover;
     background-position:center;
   }
+  /* portrait phones use the vertical splash */
+  @media (orientation: portrait){
+    #empty{
+      background-image:
+        linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.25) 35%, rgba(0,0,0,.65) 100%),
+        url('splash-portrait.jpg');
+    }
+  }
   #empty .logo{
     width:84px;height:84px;border-radius:24px;margin-bottom:18px;
     background:rgba(255,255,255,0.14);
@@ -157,6 +165,20 @@
   #loading.show{display:flex}
   .spinner{width:30px;height:30px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* floating exit-fullscreen button (only visible while fullscreen) */
+  #exitFull{
+    position:fixed;top:max(14px,env(safe-area-inset-top));right:14px;z-index:90;
+    width:44px;height:44px;border-radius:50%;
+    display:none;align-items:center;justify-content:center;
+    background:var(--glass-strong);border:1px solid var(--glass-border);
+    backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+    color:var(--label);cursor:pointer;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);
+  }
+  #exitFull svg{width:20px;height:20px}
+  #exitFull:active{transform:scale(.94)}
+  body.is-full #exitFull, body.fake-full #exitFull{display:flex}
 
   /* ---------- gallery overlay ---------- */
   #gallery{
@@ -273,6 +295,10 @@
 <div id="toast"></div>
 <div id="loading"><div class="spinner"></div></div>
 
+<button id="exitFull" title="退出全屏" onclick="toggleFullscreen()">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
+</button>
+
 <input id="fimg" type="file" accept="image/*">
 <input id="fvid" type="file" accept="video/*">
 
@@ -291,7 +317,7 @@ let video, videoTexture;
 // view state
 const view = {
   yaw: 0, pitch: 0, fov: 75,
-  userYaw: 0, userPitch: 0,   // finger offset (added on top of device orientation when gyro on)
+  userYaw: 0, userPitch: 0,   // finger recenter offset (local-frame, gyro mode)
   gyroOn: false,
   autoOn: false,
 };
@@ -339,22 +365,17 @@ const _euler = new THREE.Euler();
 function animate(){
   requestAnimationFrame(animate);
 
-  // compute device yaw/pitch from quaternion
   if (view.gyroOn && hasDevOrient){
-    _euler.setFromQuaternion(devQuat, 'YXZ');
-    const dyaw = _euler.y;
-    const dpitch = _euler.x;
-    view.yaw = dyaw + view.userYaw;
-    view.pitch = clamp(dpitch + view.userPitch, -1.55, 1.55);
+    // 1:1 device orientation (raw quaternion, no euler decomposition → no gimbal-lock oversensitivity)
+    camera.quaternion.copy(devQuat);
+    // finger recenter offset, applied in LOCAL (screen-relative) frame so "right" is always screen-right
+    camera.rotateY(view.userYaw);
+    camera.rotateX(view.userPitch);
   } else {
-    view.yaw += view.userYaw;   // userYaw acts as delta when no gyro
-    view.userYaw = 0;
-    view.pitch = clamp(view.pitch + view.userPitch, -1.55, 1.55);
-    view.userPitch = 0;
     if (view.autoOn && !dragging) view.yaw += 0.0018;
+    camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
   }
 
-  camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
   if (Math.abs(camera.fov - view.fov) > 0.01){
     camera.fov = view.fov;
     camera.updateProjectionMatrix();
@@ -394,6 +415,8 @@ function loadVideo(file){
   video.muted = false;
   video.setAttribute('playsinline','');
   video.setAttribute('webkit-playsinline','');
+  video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:0;top:0;';
+  document.body.appendChild(video);
   video.addEventListener('loadeddata', ()=>{
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
@@ -435,6 +458,7 @@ function cleanupVideo(){
     if (video.src) URL.revokeObjectURL(video.src);
     video.removeAttribute('src');
     video.load();
+    video.remove();
     video = null;
   }
   document.getElementById('videoctrl').classList.remove('show');
@@ -462,6 +486,10 @@ function onScreenOrient(){
 
 async function toggleGyro(){
   if (view.gyroOn){
+    // hand off: bake current camera orientation into yaw/pitch so the view doesn't jump
+    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
+    view.yaw = _euler.y;
+    view.pitch = _euler.x;
     view.gyroOn = false;
     window.removeEventListener('deviceorientation', onDeviceOrient);
     document.getElementById('btnGyro').classList.remove('active');
@@ -507,9 +535,15 @@ stage.addEventListener('pointermove', e=>{
   if (!dragging || pinchActive) return;
   const dx = e.clientX - lastX, dy = e.clientY - lastY;
   lastX = e.clientX; lastY = e.clientY;
-  const sens = view.fov / 75 * 0.005;
-  view.userYaw -= dx * sens;
-  view.userPitch -= dy * sens;
+  const sens = view.fov / 75 * 0.004;
+  if (view.gyroOn){
+    // local-frame recenter offset; sign = "grab the panorama" (drag right → look left)
+    view.userYaw += dx * sens;
+    view.userPitch = clamp(view.userPitch + dy * sens, -1.55, 1.55);
+  } else {
+    view.yaw += dx * sens;
+    view.pitch = clamp(view.pitch + dy * sens, -1.55, 1.55);
+  }
 });
 stage.addEventListener('pointerup', ()=>{ dragging = false; });
 stage.addEventListener('pointercancel', ()=>{ dragging = false; });
@@ -556,6 +590,13 @@ function toggleAuto(){
 }
 
 /* ============ fullscreen ============ */
+function syncFullClass(){
+  const on = !!(document.fullscreenElement || document.webkitFullscreenElement) || !!document._iosFull;
+  document.body.classList.toggle('is-full', on);
+}
+document.addEventListener('fullscreenchange', syncFullClass);
+document.addEventListener('webkitfullscreenchange', syncFullClass);
+
 window.toggleFullscreen = ()=>{
   const el = document.documentElement;
   const isFull = document.fullscreenElement || document.webkitFullscreenElement || document._iosFull;
@@ -564,17 +605,18 @@ window.toggleFullscreen = ()=>{
     else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
     document.body.classList.remove('fake-full');
     document._iosFull = false;
+    syncFullClass();
     return;
   }
   // iOS Safari: no Fullscreen API on arbitrary elements — use native video fullscreen
   // in video mode, otherwise fall back to a chrome-hiding "fake" fullscreen.
   if (mode === 'video' && video && video.webkitEnterFullscreen){
     video.webkitEnterFullscreen();
-    return;
+    return; // native video fullscreen fires its own UI with a Done button
   }
   if (el.requestFullscreen) el.requestFullscreen();
   else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-  else { document.body.classList.add('fake-full'); document._iosFull = true; }
+  else { document.body.classList.add('fake-full'); document._iosFull = true; syncFullClass(); }
 };
 
 /* ============ video controls ============ */
