@@ -1,53 +1,761 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>360 Viewer</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
-<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
 <style>
-body{margin:0;font-family:system-ui,-apple-system}
-#top{padding:10px;border-bottom:1px solid #eee;display:flex;gap:10px;align-items:center}
-#viewer{width:100vw;height:calc(100vh - 52px);background:#000;display:flex;align-items:center;justify-content:center}
-#hint{color:#bbb;text-align:center;font-size:14px;line-height:1.6}
-input{display:none}
-button,label{padding:8px 10px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer}
+  :root{
+    --glass: rgba(28,28,30,0.55);
+    --glass-strong: rgba(28,28,30,0.72);
+    --glass-border: rgba(255,255,255,0.12);
+    --label: rgba(255,255,255,0.92);
+    --sub: rgba(255,255,255,0.55);
+    --accent: #0a84ff;
+    --radius: 18px;
+    --pad: max(12px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom)) 16px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",system-ui,sans-serif;
+    background:#000;
+    color:var(--label);
+    overflow:hidden;
+    overscroll-behavior:none;
+    touch-action:none;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+
+  /* ---------- viewer ---------- */
+  #stage{position:fixed;inset:0;background:#000}
+  #stage canvas{display:block;width:100%!important;height:100%!important}
+
+  /* ---------- empty state ---------- */
+  #empty{
+    position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:32px;gap:6px;z-index:5;
+    background-image:
+      linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.25) 35%, rgba(0,0,0,.65) 100%),
+      url('splash.jpg');
+    background-size:cover;
+    background-position:center;
+  }
+  #empty .logo{
+    width:84px;height:84px;border-radius:24px;margin-bottom:18px;
+    background:rgba(255,255,255,0.14);
+    backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+    border:1px solid rgba(255,255,255,0.18);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 12px 40px rgba(0,0,0,.4);
+  }
+  #empty .logo svg{width:44px;height:44px;opacity:.9}
+  #empty h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-.3px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
+  #empty p{font-size:14px;color:rgba(255,255,255,.8);margin:0;line-height:1.5;max-width:280px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
+  #empty .hint-btns{display:flex;gap:10px;margin-top:22px}
+  .primary-btn{
+    appearance:none;border:none;cursor:pointer;
+    padding:12px 20px;border-radius:14px;font-size:15px;font-weight:600;
+    background:var(--accent);color:#fff;
+  }
+  .ghost-btn{
+    appearance:none;cursor:pointer;
+    padding:12px 20px;border-radius:14px;font-size:15px;font-weight:500;
+    background:var(--glass);color:var(--label);
+    border:1px solid var(--glass-border);
+    backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+  }
+
+  /* ---------- top bar ---------- */
+  #topbar{
+    position:fixed;top:0;left:0;right:0;z-index:20;
+    padding:max(12px,env(safe-area-inset-top)) 14px 12px;
+    display:flex;align-items:center;gap:10px;
+    background:linear-gradient(180deg,rgba(0,0,0,.45),rgba(0,0,0,0));
+    pointer-events:none;
+  }
+  #topbar > *{pointer-events:auto}
+  .title{font-size:17px;font-weight:600;letter-spacing:-.2px;padding-left:4px}
+  .spacer{flex:1}
+  .iconbtn{
+    appearance:none;cursor:pointer;
+    width:40px;height:40px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--glass);border:1px solid var(--glass-border);
+    backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);
+    color:var(--label);
+  }
+  .iconbtn svg{width:20px;height:20px}
+  .iconbtn:active{transform:scale(.94)}
+  .iconbtn.active{background:var(--accent);border-color:transparent}
+
+  /* file inputs hidden */
+  input[type=file]{display:none}
+
+  /* ---------- bottom control dock ---------- */
+  #dock{
+    position:fixed;left:50%;bottom:max(14px,env(safe-area-inset-bottom));
+    transform:translateX(-50%);z-index:20;
+    display:flex;align-items:center;gap:6px;
+    padding:8px;border-radius:26px;
+    background:var(--glass-strong);border:1px solid var(--glass-border);
+    backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+    box-shadow:0 12px 40px rgba(0,0,0,.4);
+    max-width:calc(100vw - 24px);
+  }
+  #dock .iconbtn{background:transparent;border:none;width:42px;height:42px}
+  #dock .iconbtn.active{background:var(--accent)}
+  #dock .divider{width:1px;height:24px;background:var(--glass-border);margin:0 2px}
+
+  /* ---------- video controls ---------- */
+  #videoctrl{
+    position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 64px);
+    transform:translateX(-50%);z-index:20;
+    width:min(560px,calc(100vw - 24px));
+    padding:10px 14px;border-radius:18px;
+    background:var(--glass-strong);border:1px solid var(--glass-border);
+    backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+    display:none;align-items:center;gap:10px;
+  }
+  #videoctrl.show{display:flex}
+  #vplay{width:34px;height:34px;border-radius:50%;background:transparent;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  #vplay svg{width:20px;height:20px}
+  #vtime{font-size:11px;font-variant-numeric:tabular-nums;color:var(--sub);min-width:38px;text-align:center}
+  #vseek{
+    flex:1;height:4px;border-radius:2px;appearance:none;-webkit-appearance:none;
+    background:rgba(255,255,255,.25);cursor:pointer;
+  }
+  #vseek::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.4);margin-top:-5px;
+  }
+  #vseek::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:none}
+  #vmute{width:34px;height:34px;border-radius:50%;background:transparent;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  #vmute svg{width:18px;height:18px}
+
+  /* ---------- toast ---------- */
+  #toast{
+    position:fixed;left:50%;top:calc(max(12px,env(safe-area-inset-top)) + 60px);
+    transform:translateX(-50%) translateY(-12px);z-index:60;
+    padding:10px 16px;border-radius:14px;font-size:14px;
+    background:var(--glass-strong);border:1px solid var(--glass-border);
+    backdrop-filter:blur(28px) saturate(180%);-webkit-backdrop-filter:blur(28px) saturate(180%);
+    opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:90vw;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* fake fullscreen (iOS photo mode): hide chrome */
+  body.fake-full #topbar, body.fake-full #dock, body.fake-full #videoctrl{display:none!important}
+
+  /* ---------- loading ---------- */
+  #loading{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.4)}
+  #loading.show{display:flex}
+  .spinner{width:30px;height:30px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---------- gallery overlay ---------- */
+  #gallery{
+    position:fixed;inset:0;z-index:70;display:none;flex-direction:column;
+    background:rgba(0,0,0,.86);
+    backdrop-filter:blur(40px) saturate(120%);-webkit-backdrop-filter:blur(40px) saturate(120%);
+  }
+  #gallery.show{display:flex}
+  #ghead{
+    display:flex;align-items:center;gap:10px;
+    padding:max(12px,env(safe-area-inset-top)) 14px 10px;
+  }
+  #ghead .title{flex:1;font-size:17px;font-weight:600}
+  #gscroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:6px 14px max(20px,env(safe-area-inset-bottom))}
+  .gsection{font-size:13px;font-weight:600;color:var(--sub);margin:14px 2px 8px;letter-spacing:.2px}
+  .ggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px}
+  .gthumb{position:relative;aspect-ratio:1/1;border-radius:6px;overflow:hidden;background:#1c1c1e;cursor:pointer}
+  .gthumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .gthumb:active{opacity:.8}
+  .gthumb.cur::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 3px var(--accent);border-radius:6px}
+  #gempty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:14px;flex-direction:column;gap:10px}
+  #gempty svg{width:42px;height:42px;opacity:.4}
 </style>
 </head>
 <body>
-<div id="top">
-<label>
-打开 360 图片
-<input id="f" type="file" accept="image/*">
-</label>
-<button onclick="clearView()">清空</button>
-</div>
 
-<div id="viewer">
-  <div id="hint">
-    拖入 360 全景图<br>
-    或点击上方「打开 360 图片」<br>
-    <span style="font-size:12px;color:#888">仅本地查看，刷新即消失</span>
+<div id="stage"></div>
+
+<!-- empty state -->
+<div id="empty">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+    </svg>
+  </div>
+  <h1>360 Viewer</h1>
+  <p>打开或拖入 360 全景图 / 360 视频<br>移动端可开启陀螺仪，转动设备观看</p>
+  <div class="hint-btns">
+    <button class="primary-btn" onclick="document.getElementById('fimg').click()">打开 360 图片</button>
+    <button class="ghost-btn" onclick="document.getElementById('fvid').click()">打开 360 视频</button>
   </div>
 </div>
 
-<script>
-let v,u;
-function clearView(){
-if(u)URL.revokeObjectURL(u);
-viewer.innerHTML='<div id="hint">拖入 360 全景图<br>或点击上方「打开 360 图片」<br><span style="font-size:12px;color:#888">仅本地查看，刷新即消失</span></div>';
-v=u=null;
+<!-- top bar -->
+<div id="topbar" style="display:none">
+  <span class="title" id="modeTitle">360 Viewer</span>
+  <span class="spacer"></span>
+  <button class="iconbtn" id="btnImg" title="打开图片" onclick="document.getElementById('fimg').click()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="m21 16-5-5L5 19"/></svg>
+  </button>
+  <button class="iconbtn" id="btnVid" title="打开视频" onclick="document.getElementById('fvid').click()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+  </button>
+  <button class="iconbtn" id="btnGallery" title="画廊" onclick="openGallery()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="9" r="1.6"/><path d="m21 16-4-4-7 7"/></svg>
+  </button>
+</div>
+
+<!-- bottom dock -->
+<div id="dock" style="display:none">
+  <button class="iconbtn" id="btnGyro" title="陀螺仪" onclick="toggleGyro()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><path d="m4.9 4.9 2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
+  </button>
+  <button class="iconbtn" id="btnAuto" title="自动旋转" onclick="toggleAuto()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg>
+  </button>
+  <button class="iconbtn" id="btnReset" title="重置视角" onclick="resetView()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg>
+  </button>
+  <div class="divider"></div>
+  <button class="iconbtn" id="btnZoomOut" title="缩小" onclick="zoomBy(10)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg>
+  </button>
+  <button class="iconbtn" id="btnZoomIn" title="放大" onclick="zoomBy(-10)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+  <div class="divider"></div>
+  <button class="iconbtn" id="btnFull" title="全屏" onclick="toggleFullscreen()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M16 21h3a2 2 0 0 0 2-2v-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg>
+  </button>
+</div>
+
+<!-- video controls -->
+<div id="videoctrl">
+  <button id="vplay" onclick="togglePlay()">
+    <svg id="vplayIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+  </button>
+  <span id="vtime">0:00</span>
+  <input id="vseek" type="range" min="0" max="1000" value="0" oninput="onSeek(this.value)">
+  <span id="vdur" style="font-size:11px;font-variant-numeric:tabular-nums;color:var(--sub);min-width:38px;text-align:center">0:00</span>
+  <button id="vmute" onclick="toggleMute()">
+    <svg id="vmuteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19 6a8 8 0 0 1 0 12"/></svg>
+  </button>
+</div>
+
+<!-- gallery -->
+<div id="gallery">
+  <div id="ghead">
+    <span class="title">相册</span>
+    <button class="iconbtn" onclick="closeGallery()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <div id="gscroll">
+    <div id="glist"></div>
+    <div id="gempty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="9" r="1.6"/><path d="m21 16-4-4-7 7"/></svg>
+      <span>还没有图片<br>打开 360 图片后会自动出现在这里</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="loading"><div class="spinner"></div></div>
+
+<input id="fimg" type="file" accept="image/*">
+<input id="fvid" type="file" accept="video/*">
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ============ globals ============ */
+const stage = document.getElementById('stage');
+let renderer, scene, camera, mesh, currentTexture;
+let mode = null;            // 'photo' | 'video'
+let video, videoTexture;
+
+// view state
+const view = {
+  yaw: 0, pitch: 0, fov: 75,
+  userYaw: 0, userPitch: 0,   // finger offset (added on top of device orientation when gyro on)
+  gyroOn: false,
+  autoOn: false,
+};
+
+// device orientation
+let devQuat = new THREE.Quaternion();
+let screenOrient = 0;
+let hasDevOrient = false;
+
+// gallery
+const gallery = []; // {url, name, time, thumb}
+
+/* ============ three setup ============ */
+function initThree(){
+  renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  stage.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(view.fov, window.innerWidth/window.innerHeight, 0.1, 1100);
+  camera.rotation.order = 'YXZ';
+
+  const geo = new THREE.SphereGeometry(500, 72, 48);
+  geo.scale(-1, 1, 1); // view from inside
+  const mat = new THREE.MeshBasicMaterial({color:0x000000});
+  mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh);
+
+  window.addEventListener('resize', onResize);
+  onResize();
+  animate();
 }
-function loadFile(f){
-if(u)URL.revokeObjectURL(u);
-u=URL.createObjectURL(f);
-viewer.innerHTML='';
-v=pannellum.viewer('viewer',{type:'equirectangular',panorama:u,autoLoad:true});
+
+function onResize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
 }
-f.onchange=e=>e.target.files[0]&&loadFile(e.target.files[0]);
-viewer.ondragover=e=>e.preventDefault();
-viewer.ondrop=e=>{e.preventDefault();e.dataTransfer.files[0]&&loadFile(e.dataTransfer.files[0])};
+
+/* ============ render loop ============ */
+const _euler = new THREE.Euler();
+function animate(){
+  requestAnimationFrame(animate);
+
+  // compute device yaw/pitch from quaternion
+  if (view.gyroOn && hasDevOrient){
+    _euler.setFromQuaternion(devQuat, 'YXZ');
+    const dyaw = _euler.y;
+    const dpitch = _euler.x;
+    view.yaw = dyaw + view.userYaw;
+    view.pitch = clamp(dpitch + view.userPitch, -1.55, 1.55);
+  } else {
+    view.yaw += view.userYaw;   // userYaw acts as delta when no gyro
+    view.userYaw = 0;
+    view.pitch = clamp(view.pitch + view.userPitch, -1.55, 1.55);
+    view.userPitch = 0;
+    if (view.autoOn && !dragging) view.yaw += 0.0018;
+  }
+
+  camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
+  if (Math.abs(camera.fov - view.fov) > 0.01){
+    camera.fov = view.fov;
+    camera.updateProjectionMatrix();
+  }
+  renderer.render(scene, camera);
+}
+
+function clamp(v,a,b){return v<a?a:v>b?b:v}
+
+/* ============ loading media ============ */
+function loadPhoto(file){
+  showLoading(true);
+  cleanupVideo();
+  const url = URL.createObjectURL(file);
+  const tex = new THREE.TextureLoader().load(url, t=>{
+    t.colorSpace = THREE.SRGBColorSpace;
+    applyTexture(tex);
+    mode = 'photo';
+    onMediaReady(file, url);
+    addToGallery(file, url);
+  }, undefined, ()=>{
+    showLoading(false);
+    toast('图片加载失败');
+  });
+}
+
+function loadVideo(file){
+  showLoading(true);
+  cleanupVideo();
+  const url = URL.createObjectURL(file);
+  video = document.createElement('video');
+  video.src = url;
+  video.crossOrigin = 'anonymous';
+  video.playsInline = true;
+  video.loop = true;
+  video.preload = 'auto';
+  video.muted = false;
+  video.setAttribute('playsinline','');
+  video.setAttribute('webkit-playsinline','');
+  video.addEventListener('loadeddata', ()=>{
+    videoTexture = new THREE.VideoTexture(video);
+    videoTexture.colorSpace = THREE.SRGBColorSpace;
+    applyTexture(videoTexture);
+    mode = 'video';
+    onMediaReady(file, url);
+    document.getElementById('videoctrl').classList.add('show');
+    video.addEventListener('timeupdate', updateVideoTime);
+    video.addEventListener('loadedmetadata', ()=>{ document.getElementById('vdur').textContent = fmt(video.duration); });
+    video.play().catch(()=>{ /* autoplay may need gesture; show play icon */ setPlayIcon(false); });
+    setPlayIcon(true);
+  }, {once:true});
+  video.addEventListener('error', ()=>{ showLoading(false); toast('视频加载失败，文件可能过大或格式不支持'); });
+}
+
+function applyTexture(tex){
+  if (currentTexture && currentTexture !== videoTexture) currentTexture.dispose();
+  currentTexture = tex;
+  mesh.material.map = tex;
+  mesh.material.color.set(0xffffff);
+  mesh.material.needsUpdate = true;
+}
+
+function onMediaReady(file, url){
+  showLoading(false);
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('topbar').style.display = 'flex';
+  document.getElementById('dock').style.display = 'flex';
+  document.getElementById('modeTitle').textContent = mode === 'video' ? '360 视频' : '360 图片';
+  // reset view
+  view.userYaw = view.userPitch = 0;
+  view.fov = 75;
+}
+
+function cleanupVideo(){
+  if (videoTexture){ videoTexture.dispose(); videoTexture = null; }
+  if (video){
+    video.pause();
+    if (video.src) URL.revokeObjectURL(video.src);
+    video.removeAttribute('src');
+    video.load();
+    video = null;
+  }
+  document.getElementById('videoctrl').classList.remove('show');
+}
+
+/* ============ device orientation ============ */
+const _zee = new THREE.Vector3(0,0,1);
+const _euler2 = new THREE.Euler();
+const _q0 = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+
+function onDeviceOrient(e){
+  if (e.alpha === null || e.beta === null || e.gamma === null) return;
+  hasDevOrient = true;
+  const orient = screenOrient || 0;
+  _euler2.set(e.beta, e.alpha, -e.gamma, 'YXZ');
+  devQuat.setFromEuler(_euler2);
+  devQuat.multiply(_q1);
+  devQuat.multiply(_q0.setFromAxisAngle(_zee, -orient));
+}
+
+function onScreenOrient(){
+  screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle) || window.orientation || 0;
+}
+
+async function toggleGyro(){
+  if (view.gyroOn){
+    view.gyroOn = false;
+    window.removeEventListener('deviceorientation', onDeviceOrient);
+    document.getElementById('btnGyro').classList.remove('active');
+    return;
+  }
+  // request permission (iOS 13+)
+  try{
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res !== 'granted'){ toast('未授权陀螺仪'); return; }
+    }
+  }catch(err){ /* desktop / unsupported, ignore */ }
+  onScreenOrient();
+  window.addEventListener('orientationchange', onScreenOrient);
+  window.addEventListener('deviceorientation', onDeviceOrient);
+  // give it a moment to deliver first event
+  const t0 = performance.now();
+  const check = ()=>{
+    if (hasDevOrient){
+      // reset user offset so current device heading = forward
+      view.userYaw = view.userPitch = 0;
+      view.gyroOn = true;
+      document.getElementById('btnGyro').classList.add('active');
+      toast('陀螺仪已开启，转动设备观看');
+    } else if (performance.now() - t0 < 1500){
+      setTimeout(check, 100);
+    } else {
+      toast('当前设备无陀螺仪数据');
+    }
+  };
+  check();
+}
+
+/* ============ input: drag + pinch ============ */
+let dragging = false, lastX=0, lastY=0, pinchDist=0, pinchActive=false;
+
+stage.addEventListener('pointerdown', e=>{
+  if (e.pointerType === 'touch' && e.isPrimary === false) return;
+  dragging = !pinchActive;
+  lastX = e.clientX; lastY = e.clientY;
+});
+stage.addEventListener('pointermove', e=>{
+  if (!dragging || pinchActive) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  const sens = view.fov / 75 * 0.005;
+  view.userYaw -= dx * sens;
+  view.userPitch -= dy * sens;
+});
+stage.addEventListener('pointerup', ()=>{ dragging = false; });
+stage.addEventListener('pointercancel', ()=>{ dragging = false; });
+
+// pinch zoom (two-finger)
+stage.addEventListener('touchstart', e=>{
+  if (e.touches.length >= 2){ pinchActive = true; dragging = false; pinchDist = 0; }
+}, {passive:true});
+stage.addEventListener('touchmove', e=>{
+  if (e.touches.length === 2 && pinchActive){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const d = Math.hypot(dx, dy);
+    if (pinchDist){
+      const delta = (pinchDist - d) * 0.15;
+      view.fov = clamp(view.fov + delta, 30, 100);
+    }
+    pinchDist = d;
+    e.preventDefault();
+  }
+}, {passive:false});
+stage.addEventListener('touchend', e=>{
+  if (e.touches.length < 2){ pinchActive = false; pinchDist = 0; }
+});
+
+// wheel zoom (desktop)
+stage.addEventListener('wheel', e=>{
+  view.fov = clamp(view.fov + Math.sign(e.deltaY)*3, 30, 100);
+  e.preventDefault();
+}, {passive:false});
+
+window.zoomBy = d => { view.fov = clamp(view.fov + d, 30, 100); };
+
+function resetView(){
+  view.userYaw = view.userPitch = 0;
+  if (!view.gyroOn){ view.yaw = 0; view.pitch = 0; }
+  view.fov = 75;
+  toast('已重置视角');
+}
+
+function toggleAuto(){
+  view.autoOn = !view.autoOn;
+  document.getElementById('btnAuto').classList.toggle('active', view.autoOn);
+}
+
+/* ============ fullscreen ============ */
+window.toggleFullscreen = ()=>{
+  const el = document.documentElement;
+  const isFull = document.fullscreenElement || document.webkitFullscreenElement || document._iosFull;
+  if (isFull){
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    document.body.classList.remove('fake-full');
+    document._iosFull = false;
+    return;
+  }
+  // iOS Safari: no Fullscreen API on arbitrary elements — use native video fullscreen
+  // in video mode, otherwise fall back to a chrome-hiding "fake" fullscreen.
+  if (mode === 'video' && video && video.webkitEnterFullscreen){
+    video.webkitEnterFullscreen();
+    return;
+  }
+  if (el.requestFullscreen) el.requestFullscreen();
+  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else { document.body.classList.add('fake-full'); document._iosFull = true; }
+};
+
+/* ============ video controls ============ */
+window.togglePlay = ()=>{
+  if (!video) return;
+  if (video.paused){ video.play(); setPlayIcon(true); } else { video.pause(); setPlayIcon(false); }
+};
+window.toggleMute = ()=>{
+  if (!video) return;
+  video.muted = !video.muted;
+  updateMuteIcon();
+};
+window.onSeek = v=>{
+  if (!video || !video.duration) return;
+  video.currentTime = (v/1000) * video.duration;
+};
+function setPlayIcon(playing){
+  const ic = document.getElementById('vplayIcon');
+  ic.innerHTML = playing
+    ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+    : '<path d="M8 5v14l11-7z"/>';
+}
+function updateMuteIcon(){
+  const ic = document.getElementById('vmuteIcon');
+  if (video && video.muted){
+    ic.innerHTML = '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="m22 9-6 6M16 9l6 6"/>';
+  } else {
+    ic.innerHTML = '<path d="M11 5 6 9H3v6h3l5 4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19 6a8 8 0 0 1 0 12"/>';
+  }
+}
+function updateVideoTime(){
+  if (!video) return;
+  const cur = video.currentTime, dur = video.duration || 0;
+  document.getElementById('vtime').textContent = fmt(cur);
+  const seek = document.getElementById('vseek');
+  if (!seekDragging) seek.value = dur ? (cur/dur)*1000 : 0;
+}
+let seekDragging = false;
+document.getElementById('vseek').addEventListener('pointerdown', ()=>seekDragging=true);
+document.getElementById('vseek').addEventListener('pointerup', ()=>seekDragging=false);
+function fmt(s){
+  if (!isFinite(s)) s = 0;
+  s = Math.floor(s);
+  const m = Math.floor(s/60), ss = s%60;
+  return m + ':' + String(ss).padStart(2,'0');
+}
+
+/* ============ gallery ============ */
+function addToGallery(file, url){
+  // generate thumbnail
+  const img = new Image();
+  img.onload = ()=>{
+    const c = document.createElement('canvas');
+    const S = 256;
+    const ratio = img.width / img.height;
+    let tw, th;
+    if (ratio >= 1){ th = S; tw = S * ratio; } else { tw = S; th = S / ratio; }
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    // center-crop to square
+    const sx = (img.width - img.height)/2;
+    const sy = (img.height - img.height)/2;
+    const srcS = Math.min(img.width, img.height);
+    ctx.drawImage(img, Math.max(0,sx), Math.max(0,sy), srcS, srcS, 0, 0, S, S);
+    const thumb = c.toDataURL('image/jpeg', 0.7);
+    const entry = { url, name: file.name, time: Date.now(), thumb, current: true };
+    gallery.forEach(g=>g.current=false);
+    gallery.unshift(entry);
+    renderGallery();
+  };
+  img.onerror = ()=>{
+    const entry = { url, name: file.name, time: Date.now(), thumb:'', current:true };
+    gallery.forEach(g=>g.current=false);
+    gallery.unshift(entry);
+    renderGallery();
+  };
+  img.src = url;
+}
+
+window.openGallery = ()=>{
+  renderGallery();
+  document.getElementById('gallery').classList.add('show');
+};
+window.closeGallery = ()=>{ document.getElementById('gallery').classList.remove('show'); };
+
+function renderGallery(){
+  const list = document.getElementById('glist');
+  const gempty = document.getElementById('gempty');
+  list.innerHTML = '';
+  if (gallery.length === 0){ gempty.style.display = 'flex'; return; }
+  gempty.style.display = 'none';
+
+  // group by date (newest first)
+  const sorted = [...gallery].sort((a,b)=>b.time - a.time);
+  const groups = {};
+  for (const g of sorted){
+    const key = dateLabel(g.time);
+    (groups[key] = groups[key] || []).push(g);
+  }
+  for (const key of Object.keys(groups)){
+    const sec = document.createElement('div');
+    sec.className = 'gsection';
+    sec.textContent = key;
+    list.appendChild(sec);
+    const grid = document.createElement('div');
+    grid.className = 'ggrid';
+    for (const g of groups[key]){
+      const d = document.createElement('div');
+      d.className = 'gthumb' + (g.current ? ' cur' : '');
+      if (g.thumb){
+        const im = document.createElement('img');
+        im.src = g.thumb; im.loading='lazy';
+        d.appendChild(im);
+      }
+      d.onclick = ()=>{ loadPhotoFromGallery(g); };
+      grid.appendChild(d);
+    }
+    list.appendChild(grid);
+  }
+}
+
+function loadPhotoFromGallery(g){
+  showLoading(true);
+  cleanupVideo();
+  const tex = new THREE.TextureLoader().load(g.url, t=>{
+    t.colorSpace = THREE.SRGBColorSpace;
+    applyTexture(tex);
+    mode = 'photo';
+    onMediaReady(null, g.url);
+    gallery.forEach(x=>x.current = (x===g));
+    renderGallery();
+    closeGallery();
+  }, undefined, ()=>{ showLoading(false); toast('加载失败'); });
+}
+
+function dateLabel(t){
+  const d = new Date(t);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(now.getDate()-1);
+  const isYest = d.toDateString() === yest.toDateString();
+  if (sameDay) return '今天';
+  if (isYest) return '昨天';
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+/* ============ helpers ============ */
+let toastTimer;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), 2200);
+}
+function showLoading(b){ document.getElementById('loading').classList.toggle('show', b); }
+
+/* ============ file wiring ============ */
+document.getElementById('fimg').addEventListener('change', e=>{
+  const f = e.target.files[0]; if (f){ loadPhoto(f); e.target.value=''; }
+});
+document.getElementById('fvid').addEventListener('change', e=>{
+  const f = e.target.files[0]; if (f){ loadVideo(f); e.target.value=''; }
+});
+
+// drag & drop
+window.addEventListener('dragover', e=>e.preventDefault());
+window.addEventListener('drop', e=>{
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  if (f.type.startsWith('video/')) loadVideo(f);
+  else if (f.type.startsWith('image/')) loadPhoto(f);
+});
+
+// expose for onclick handlers
+window.toggleGyro = toggleGyro;
+window.toggleAuto = toggleAuto;
+window.resetView = resetView;
+
+initThree();
 </script>
 </body>
 </html>
