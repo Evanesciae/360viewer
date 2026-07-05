@@ -161,9 +161,10 @@
   body.fake-full #topbar, body.fake-full #dock, body.fake-full #videoctrl{display:none!important}
 
   /* ---------- loading ---------- */
-  #loading{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.4)}
+  #loading{position:fixed;inset:0;z-index:50;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.55)}
   #loading.show{display:flex}
   .spinner{width:30px;height:30px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin .8s linear infinite}
+  #loadMsg{font-size:13px;color:rgba(255,255,255,.7);max-width:80vw;text-align:center;line-height:1.4}
   @keyframes spin{to{transform:rotate(360deg)}}
 
   /* floating exit-fullscreen button (only visible while fullscreen) */
@@ -290,7 +291,7 @@
 </div>
 
 <div id="toast"></div>
-<div id="loading"><div class="spinner"></div></div>
+<div id="loading"><div class="spinner"></div><div id="loadMsg"></div></div>
 
 <button id="exitFull" title="退出全屏" onclick="toggleFullscreen()">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3M16 3v3a2 2 0 0 0 2 2h3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
@@ -384,21 +385,28 @@ function loadPhoto(file){
 }
 
 function loadVideo(file){
-  showLoading(true);
+  const sizeMB = (file.size/1048576).toFixed(1);
+  showLoading(true, `本地读取中 · ${file.name}（${sizeMB} MB）`);
   cleanupVideo();
-  const url = URL.createObjectURL(file);
+  const url = URL.createObjectURL(file); // 100% local, no upload
   video = document.createElement('video');
   video.src = url;
   video.crossOrigin = 'anonymous';
   video.playsInline = true;
   video.loop = true;
-  video.preload = 'auto';
+  video.preload = 'metadata'; // only fetch metadata first, not the whole multi-GB file
   video.muted = false;
   video.setAttribute('playsinline','');
   video.setAttribute('webkit-playsinline','');
   video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:0;top:0;';
   document.body.appendChild(video);
-  video.addEventListener('loadeddata', ()=>{
+
+  let ready = false;
+  let watchdog;
+  const onReady = () => {
+    if (ready) return;
+    ready = true;
+    clearTimeout(watchdog);
     videoTexture = new THREE.VideoTexture(video);
     videoTexture.colorSpace = THREE.SRGBColorSpace;
     applyTexture(videoTexture);
@@ -406,11 +414,34 @@ function loadVideo(file){
     onMediaReady(file, url);
     document.getElementById('videoctrl').classList.add('show');
     video.addEventListener('timeupdate', updateVideoTime);
-    video.addEventListener('loadedmetadata', ()=>{ document.getElementById('vdur').textContent = fmt(video.duration); });
-    video.play().catch(()=>{ /* autoplay may need gesture; show play icon */ setPlayIcon(false); });
-    setPlayIcon(true);
+    document.getElementById('vdur').textContent = fmt(video.duration);
+    // start playback; if sound is blocked by autoplay policy, retry muted
+    video.play().then(()=>setPlayIcon(true)).catch(()=>{
+      video.muted = true; updateMuteIcon();
+      video.play().then(()=>setPlayIcon(true)).catch(()=>setPlayIcon(false));
+    });
+  };
+
+  // metadata is enough to build the texture; first frame paints as soon as play decodes it
+  video.addEventListener('loadedmetadata', onReady, {once:true});
+  video.addEventListener('loadeddata', onReady, {once:true});
+
+  // if it's taking long, tell the user why (likely HEVC/MOV or non-fast-start MP4)
+  watchdog = setTimeout(()=>{
+    if (!ready) toast('解码较慢：可能是 HEVC/MOV 或非 fast-start MP4，稍候…');
+  }, 5000);
+
+  video.addEventListener('error', ()=>{
+    clearTimeout(watchdog);
+    showLoading(false);
+    let msg = '视频加载失败';
+    if (video.error){
+      if (video.error.code === 4) msg = '浏览器不支持此视频编码（多为 HEVC），请转为 H.264 MP4';
+      else if (video.error.code === 3) msg = '视频解码出错，文件可能损坏';
+      else if (video.error.code === 1) msg = '加载已中断';
+    }
+    toast(msg);
   }, {once:true});
-  video.addEventListener('error', ()=>{ showLoading(false); toast('视频加载失败，文件可能过大或格式不支持'); });
 }
 
 function applyTexture(tex){
@@ -684,7 +715,10 @@ function toast(msg){
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=>el.classList.remove('show'), 2200);
 }
-function showLoading(b){ document.getElementById('loading').classList.toggle('show', b); }
+function showLoading(b, msg){
+  document.getElementById('loading').classList.toggle('show', b);
+  document.getElementById('loadMsg').textContent = msg || '';
+}
 
 /* ============ file wiring ============ */
 document.getElementById('fimg').addEventListener('change', e=>{
