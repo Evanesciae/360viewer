@@ -216,7 +216,7 @@
     </svg>
   </div>
   <h1>360 Viewer</h1>
-  <p>打开或拖入 360 全景图 / 360 视频<br>移动端可开启陀螺仪，转动设备观看</p>
+  <p>打开或拖入 360 全景图 / 360 视频<br>拖动画面即可环顾四周，支持双指缩放</p>
   <div class="hint-btns">
     <button class="primary-btn" onclick="document.getElementById('fimg').click()">打开 360 图片</button>
     <button class="ghost-btn" onclick="document.getElementById('fvid').click()">打开 360 视频</button>
@@ -240,9 +240,6 @@
 
 <!-- bottom dock -->
 <div id="dock" style="display:none">
-  <button class="iconbtn" id="btnGyro" title="陀螺仪" onclick="toggleGyro()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><path d="m4.9 4.9 2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>
-  </button>
   <button class="iconbtn" id="btnAuto" title="自动旋转" onclick="toggleAuto()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg>
   </button>
@@ -317,15 +314,8 @@ let video, videoTexture;
 // view state
 const view = {
   yaw: 0, pitch: 0, fov: 75,
-  userYaw: 0, userPitch: 0,   // finger recenter offset (local-frame, gyro mode)
-  gyroOn: false,
   autoOn: false,
 };
-
-// device orientation
-let devQuat = new THREE.Quaternion();
-let screenOrient = 0;
-let hasDevOrient = false;
 
 // gallery
 const gallery = []; // {url, name, time, thumb}
@@ -361,20 +351,11 @@ function onResize(){
 }
 
 /* ============ render loop ============ */
-const _euler = new THREE.Euler();
 function animate(){
   requestAnimationFrame(animate);
 
-  if (view.gyroOn && hasDevOrient){
-    // 1:1 device orientation (raw quaternion, no euler decomposition → no gimbal-lock oversensitivity)
-    camera.quaternion.copy(devQuat);
-    // finger recenter offset, applied in LOCAL (screen-relative) frame so "right" is always screen-right
-    camera.rotateY(view.userYaw);
-    camera.rotateX(view.userPitch);
-  } else {
-    if (view.autoOn && !dragging) view.yaw += 0.0018;
-    camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
-  }
+  if (view.autoOn && !dragging) view.yaw += 0.0018;
+  camera.rotation.set(view.pitch, view.yaw, 0, 'YXZ');
 
   if (Math.abs(camera.fov - view.fov) > 0.01){
     camera.fov = view.fov;
@@ -447,7 +428,6 @@ function onMediaReady(file, url){
   document.getElementById('dock').style.display = 'flex';
   document.getElementById('modeTitle').textContent = mode === 'video' ? '360 视频' : '360 图片';
   // reset view
-  view.userYaw = view.userPitch = 0;
   view.fov = 75;
 }
 
@@ -464,65 +444,6 @@ function cleanupVideo(){
   document.getElementById('videoctrl').classList.remove('show');
 }
 
-/* ============ device orientation ============ */
-const _zee = new THREE.Vector3(0,0,1);
-const _euler2 = new THREE.Euler();
-const _q0 = new THREE.Quaternion();
-const _q1 = new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
-
-function onDeviceOrient(e){
-  if (e.alpha === null || e.beta === null || e.gamma === null) return;
-  hasDevOrient = true;
-  const orient = screenOrient || 0;
-  _euler2.set(e.beta, e.alpha, -e.gamma, 'YXZ');
-  devQuat.setFromEuler(_euler2);
-  devQuat.multiply(_q1);
-  devQuat.multiply(_q0.setFromAxisAngle(_zee, -orient));
-}
-
-function onScreenOrient(){
-  screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle) || window.orientation || 0;
-}
-
-async function toggleGyro(){
-  if (view.gyroOn){
-    // hand off: bake current camera orientation into yaw/pitch so the view doesn't jump
-    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
-    view.yaw = _euler.y;
-    view.pitch = _euler.x;
-    view.gyroOn = false;
-    window.removeEventListener('deviceorientation', onDeviceOrient);
-    document.getElementById('btnGyro').classList.remove('active');
-    return;
-  }
-  // request permission (iOS 13+)
-  try{
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-      const res = await DeviceOrientationEvent.requestPermission();
-      if (res !== 'granted'){ toast('未授权陀螺仪'); return; }
-    }
-  }catch(err){ /* desktop / unsupported, ignore */ }
-  onScreenOrient();
-  window.addEventListener('orientationchange', onScreenOrient);
-  window.addEventListener('deviceorientation', onDeviceOrient);
-  // give it a moment to deliver first event
-  const t0 = performance.now();
-  const check = ()=>{
-    if (hasDevOrient){
-      // reset user offset so current device heading = forward
-      view.userYaw = view.userPitch = 0;
-      view.gyroOn = true;
-      document.getElementById('btnGyro').classList.add('active');
-      toast('陀螺仪已开启，转动设备观看');
-    } else if (performance.now() - t0 < 1500){
-      setTimeout(check, 100);
-    } else {
-      toast('当前设备无陀螺仪数据');
-    }
-  };
-  check();
-}
-
 /* ============ input: drag + pinch ============ */
 let dragging = false, lastX=0, lastY=0, pinchDist=0, pinchActive=false;
 
@@ -536,14 +457,9 @@ stage.addEventListener('pointermove', e=>{
   const dx = e.clientX - lastX, dy = e.clientY - lastY;
   lastX = e.clientX; lastY = e.clientY;
   const sens = view.fov / 75 * 0.004;
-  if (view.gyroOn){
-    // local-frame recenter offset; sign = "grab the panorama" (drag right → look left)
-    view.userYaw += dx * sens;
-    view.userPitch = clamp(view.userPitch + dy * sens, -1.55, 1.55);
-  } else {
-    view.yaw += dx * sens;
-    view.pitch = clamp(view.pitch + dy * sens, -1.55, 1.55);
-  }
+  // grab the panorama: drag right → image moves right → look left
+  view.yaw += dx * sens;
+  view.pitch = clamp(view.pitch + dy * sens, -1.55, 1.55);
 });
 stage.addEventListener('pointerup', ()=>{ dragging = false; });
 stage.addEventListener('pointercancel', ()=>{ dragging = false; });
@@ -578,8 +494,7 @@ stage.addEventListener('wheel', e=>{
 window.zoomBy = d => { view.fov = clamp(view.fov + d, 30, 100); };
 
 function resetView(){
-  view.userYaw = view.userPitch = 0;
-  if (!view.gyroOn){ view.yaw = 0; view.pitch = 0; }
+  view.yaw = 0; view.pitch = 0;
   view.fov = 75;
   toast('已重置视角');
 }
@@ -671,16 +586,13 @@ function addToGallery(file, url){
   img.onload = ()=>{
     const c = document.createElement('canvas');
     const S = 256;
-    const ratio = img.width / img.height;
-    let tw, th;
-    if (ratio >= 1){ th = S; tw = S * ratio; } else { tw = S; th = S / ratio; }
     c.width = S; c.height = S;
     const ctx = c.getContext('2d');
     // center-crop to square
-    const sx = (img.width - img.height)/2;
-    const sy = (img.height - img.height)/2;
     const srcS = Math.min(img.width, img.height);
-    ctx.drawImage(img, Math.max(0,sx), Math.max(0,sy), srcS, srcS, 0, 0, S, S);
+    const sx = (img.width - srcS)/2;
+    const sy = (img.height - srcS)/2;
+    ctx.drawImage(img, sx, sy, srcS, srcS, 0, 0, S, S);
     const thumb = c.toDataURL('image/jpeg', 0.7);
     const entry = { url, name: file.name, time: Date.now(), thumb, current: true };
     gallery.forEach(g=>g.current=false);
@@ -793,7 +705,6 @@ window.addEventListener('drop', e=>{
 });
 
 // expose for onclick handlers
-window.toggleGyro = toggleGyro;
 window.toggleAuto = toggleAuto;
 window.resetView = resetView;
 
